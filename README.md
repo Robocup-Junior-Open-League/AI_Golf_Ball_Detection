@@ -13,3 +13,5 @@ pip install opencv-python numpy
 
 Start the program in the terminal like a normal python program:
 python name_of_saved_python_file.py
+
+The new "calibration program" takes 10 photos, that will be taken for the reference values on the current field
