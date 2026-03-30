@@ -44,11 +44,11 @@ pip install numpy
 ## ⚙️ Usage
 
 **1. Auto-Calibration**
-To adapt the camera to your current room lighting, run the calibration script first. Hold the orange ball in front of the camera.\
+To adapt the camera to your current room lighting, run the calibration script first. Hold the orange ball in front of the camera.
 ```bash
 python calibration_without_GUI.py
 ```
-**Note:** The script will take 10 photos with a 5-second delay to calculate the perfect HSV median.\
+**Note:** The script will take 10 photos with a 5-second delay to calculate the perfect HSV median.
 
 ---
 
