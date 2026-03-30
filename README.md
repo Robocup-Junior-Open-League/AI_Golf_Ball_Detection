@@ -50,6 +50,12 @@ python calibration_without_GUI.py
 ```
 **Note:** The script will take 10 photos with a 5-second delay to calculate the perfect HSV median.
 
+**2. Live Telemetry Tracking**
+Once you have your HSV values, start the main tracking script to output the JSON telemetry payload (Distance, Error-X, Error-Y):
+```bash
+python OpenCV_Ball_Detection_main.py
+```
+
 ---
 
 ## 🛠️ Troubleshooting
