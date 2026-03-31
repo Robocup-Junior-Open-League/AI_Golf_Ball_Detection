@@ -1,113 +1,109 @@
 import cv2
 import numpy as np
 import time
-
-def extract_ball_pixels(frame, rough_lower, rough_upper):
-    """
-    Findet den Ball anhand der groben Werte und gibt alle H, S und V Pixel zurück.
-    """
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, rough_lower, rough_upper)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    if not contours:
-        return None, None, None
-        
-    largest = max(contours, key=cv2.contourArea)
-    if cv2.contourArea(largest) < 100:
-        return None, None, None
-        
-    # Schablone in Form des Balls erstellen
-    ball_mask = np.zeros(frame.shape[:2], dtype="uint8")
-    cv2.drawContours(ball_mask, [largest], -1, 255, -1)
-    
-    # Bild in HSV-Kanäle aufteilen und nur die Ball-Pixel extrahieren
-    h_chan, s_chan, v_chan = cv2.split(hsv)
-    return h_chan[ball_mask==255], s_chan[ball_mask==255], v_chan[ball_mask==255]
+import sys
 
 # --- KAMERA STARTEN ---
 cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
 
+GRID_W, GRID_H = 30, 30
+
+def extract_ball_pixels(frame, rough_lower, rough_upper):
+    """Findet den Ball und gibt alle H, S und V Pixel zurück."""
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, rough_lower, rough_upper)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    if not contours: return None, None, None
+        
+    largest = max(contours, key=cv2.contourArea)
+    if cv2.contourArea(largest) < 100: return None, None, None
+        
+    ball_mask = np.zeros(frame.shape[:2], dtype="uint8")
+    cv2.drawContours(ball_mask, [largest], -1, 255, -1)
+    
+    h_chan, s_chan, v_chan = cv2.split(hsv)
+    return h_chan[ball_mask==255], s_chan[ball_mask==255], v_chan[ball_mask==255]
+
 print("\n" + "="*55)
-print(" RASPBERRY PI ZERO - REINE HSV-KALIBRIERUNG (10 BILDER)")
+print(" RASPBERRY PI - KALIBRIERUNG MIT LIVE-RADAR")
 print("="*55)
 time.sleep(2)
-
 input(">>> Halte den Ball vor die Kamera und druecke ENTER... ")
 
-# DEINE GROBEN STARTWERTE (Damit das Skript den Ball überhaupt erst findet)
-rough_lower = np.array([3, 56, 220])
-rough_upper = np.array([23, 165, 255])
+# Grobe Werte, damit wir den Ball überhaupt im Radar sehen
+rough_lower = np.array([0, 80, 80])
+rough_upper = np.array([30, 255, 255])
 
 medians_H, medians_S, medians_V = [], [], []
 TOTAL_FRAMES = 10   
 frames_taken = 0
 
-print(f"\n[+] Starte Aufnahme von genau {TOTAL_FRAMES} Bildern...\n")
-
 while frames_taken < TOTAL_FRAMES:
-    # Puffer leeren, damit wir ein absolut aktuelles Bild bekommen
-    for _ in range(5): cap.read() 
     
+    # --- LIVE-VORSCHAU PHASE (5 Sekunden) ---
+    start_time = time.time()
+    while time.time() - start_time < 5.0:
+        ret, frame = cap.read()
+        if not ret: continue
+        
+        # 1. Maske für das Vorschau-Radar
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv, rough_lower, rough_upper)
+        small_mask = cv2.resize(mask, (GRID_W, GRID_H), interpolation=cv2.INTER_NEAREST)
+        
+        # 2. Terminal leeren & Radar zeichnen
+        sys.stdout.write("\033[H\033[J")
+        print(f"FOTO {frames_taken + 1} VON {TOTAL_FRAMES} WIRD VORBEREITET...")
+        countdown = 5.0 - (time.time() - start_time)
+        print(f"Naechstes Bild in: {countdown:.1f} Sekunden (Bewege den Ball leicht)")
+        print("-" * (GRID_W * 2))
+        
+        for y in range(GRID_H):
+            row_str = ""
+            for x in range(GRID_W):
+                row_str += "██" if small_mask[y, x] > 0 else "  "
+            print(row_str)
+        print("-" * (GRID_W * 2))
+        time.sleep(0.1) # Terminal-FPS begrenzen
+
+    # --- FOTO SCHIESSEN ---
+    # Puffer leeren für ein frisches Bild
+    for _ in range(5): cap.read()
     ret, frame = cap.read()
-    if not ret: 
-        print("Fehler beim Lesen der Kamera!")
-        break
     
     h_p, s_p, v_p = extract_ball_pixels(frame, rough_lower, rough_upper)
     
     if h_p is not None:
-        # Median dieses Bildes berechnen und speichern
-        med_h = np.median(h_p)
-        med_s = np.median(s_p)
-        med_v = np.median(v_p)
-        
+        med_h, med_s, med_v = np.median(h_p), np.median(s_p), np.median(v_p)
         medians_H.append(med_h)
         medians_S.append(med_s)
         medians_V.append(med_v)
         frames_taken += 1
-        
-        print(f"    [OK] Foto {frames_taken}/{TOTAL_FRAMES} im Kasten! (H:{med_h:.1f} S:{med_s:.1f} V:{med_v:.1f})")
-        
-        # 5 Sekunden Pause (außer nach dem allerletzten Bild)
-        if frames_taken < TOTAL_FRAMES:
-            print("         Bewege den Ball leicht. Naechstes Foto in:")
-            for sec in range(5, 0, -1):
-                print(f"         {sec} Sekunden... ", end="\r")
-                time.sleep(1)
-            print("         *Klick* ", end="\r")
-            
+        print(f"\n[+] KLICK! Werte gespeichert (H:{med_h:.1f} S:{med_s:.1f} V:{med_v:.1f})")
+        time.sleep(1.5)
     else:
-        print(f"    [!] Kein Ball gefunden! Halte ihn ins Bild...{' '*10}", end="\r")
-        time.sleep(0.5)
+        print("\n[!] FEHLER: Ball beim Klick nicht gefunden! Versuche es nochmal.")
+        time.sleep(2)
 
-# Das finale Ergebnis berechnen (Durchschnitt aus den 10 Bildern)
-if len(medians_H) > 0:
-    final_h = np.mean(medians_H)
-    final_s = np.mean(medians_S)
-    final_v = np.mean(medians_V)
+# --- FINALE BERECHNUNG ---
+sys.stdout.write("\033[H\033[J")
+final_h, final_s, final_v = int(np.mean(medians_H)), int(np.mean(medians_S)), int(np.mean(medians_V))
 
-    # --- TOLERANZEN UM DEN PERFEKTEN MITTELWERT LEGEN ---
-    tol_h = 8   # +/- 8 für den exakten Farbton Orange
-    tol_s = 55  # +/- 55 für Sättigung (erlaubt Schatten)
-    tol_v = 55  # +/- 55 für Helligkeit (erlaubt Reflexionen)
+# Toleranzen
+tol_h, tol_s, tol_v = 10, 60, 60
 
-    final_h, final_s, final_v = int(final_h), int(final_s), int(final_v)
+lower_bound = np.array([max(0, final_h - tol_h), max(0, final_s - tol_s), max(0, final_v - tol_v)])
+upper_bound = np.array([min(179, final_h + tol_h), min(255, final_s + tol_s), min(255, final_v + tol_v)])
 
-    # Grenzen berechnen und sicherstellen, dass sie in OpenCVs 0-255 (bzw 0-179 für H) bleiben
-    final_lower = np.array([max(0, final_h - tol_h), max(0, final_s - tol_s), max(0, final_v - tol_v)])
-    final_upper = np.array([min(179, final_h + tol_h), min(255, final_s + tol_s), min(255, final_v + tol_v)])
-
-    print("\n\n" + "="*55)
-    print(f" KALIBRIERUNG BEENDET!")
-    print(f" Durchschnittliche Basiswerte: H={final_h}, S={final_s}, V={final_v}")
-    print("-" * 55)
-    print(f" KOPIERE DIESE WERTE IN DEIN HAUPTSKRIPT:")
-    print(f" H_MIN = {final_lower[0]:<3} | H_MAX = {final_upper[0]:<3}")
-    print(f" S_MIN = {final_lower[1]:<3} | S_MAX = {final_upper[1]:<3}")
-    print(f" V_MIN = {final_lower[2]:<3} | V_MAX = {final_upper[2]:<3}")
-    print("="*55 + "\n")
+print("="*55)
+print(" KALIBRIERUNG ERFOLGREICH BEENDET!")
+print("="*55)
+print("Kopiere diese perfekten Werte in dein main_streamer.py Skript:\n")
+print(f"lower_bound = np.array([{lower_bound[0]}, {lower_bound[1]}, {lower_bound[2]}])")
+print(f"upper_bound = np.array([{upper_bound[0]}, {upper_bound[1]}, {upper_bound[2]}])\n")
+print("="*55)
 
 cap.release()
