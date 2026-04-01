@@ -5,33 +5,34 @@ import time
 import sys
 import math
 
-# --- KAMERA & KONSTANTEN ---
+# --- KAMERA & KONSTANTEN (Auf absolute Leistung getrimmt) ---
 cap = cv2.VideoCapture(0)
-frame_w, frame_h = 320, 240
+frame_w, frame_h = 160, 120    # <--- NEU: Ultra-Low-Res (75% weniger Rechenlast!)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_w)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_h)
 
-Bw_deg = 62.2  # FOV der Pi Kamera
-DEADZONE_PIXELS = 20
+Bw_deg = 62.2  # FOV der Pi Kamera V2
+DEADZONE_PIXELS = 10           # <--- NEU: Halbiert, da das Bild kleiner ist
 
-# Raster für die Übertragung
+# Raster für die Übertragung an den PC
 GRID_W, GRID_H = 30, 30
 
-# DEINE FESTEN HSV-WERTE (Keine Eingabe mehr nötig)
-lower_bound = np.array([3, 56, 220])
-upper_bound = np.array([23, 165, 255])
+# DEINE FESTEN HSV-WERTE
+lower_bound = np.array([0, 118, 153])
+upper_bound = np.array([18, 238, 255])
 
 try:
     while True:
         ret, frame = cap.read()
         if not ret: 
-            time.sleep(0.1)
+            time.sleep(0.05)
             continue
 
-        # 1. Bild filtern
+        # 1. Bild filtern (Geht jetzt rasend schnell!)
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(hsv, lower_bound, upper_bound)
         
+        # Leichte Filterung (bei so kleinen Bildern reicht 1 Iteration völlig)
         mask = cv2.erode(mask, None, iterations=1)
         mask = cv2.dilate(mask, None, iterations=1)
 
@@ -48,10 +49,12 @@ try:
             largest_contour = max(contours, key=cv2.contourArea)
             area = cv2.contourArea(largest_contour)
             
-            if area > 50:
+            # <--- NEU: Der Ball besteht jetzt aus weniger Pixeln, daher reicht area > 12
+            if area > 12: 
                 ((cx, cy), radius) = cv2.minEnclosingCircle(largest_contour)
                 
                 # Distanz mit -2.1cm Radius-Korrektur
+                # (Die Mathematik skaliert automatisch perfekt mit der neuen Auflösung!)
                 opx = radius * 2.0
                 Ow_rad = math.radians((Bw_deg / frame_w) * opx)
                 if Ow_rad > 0:
@@ -65,7 +68,7 @@ try:
                 elif error_x > DEADZONE_PIXELS: command = "RECHTS"
                 else: command = "GERADEAUS"
                 
-                # Qualität
+                # Qualität (Wie kreisförmig ist der Fleck?)
                 circle_area = math.pi * (radius ** 2)
                 if circle_area > 0:
                     quality_pct = min(100.0, (area / circle_area) * 100.0)
@@ -89,15 +92,13 @@ try:
         for i in range(len(x_coords)):
             payload["pixels"][f"p{i+1}"] = [int(x_coords[i]), int(y_coords[i])]
 
-        # --- STREAMING (Nur das reine JSON in EINER Zeile) ---
+        # --- STREAMING ---
         json_output = json.dumps(payload)
         print(json_output)
-        
-        # WICHTIG: Zwingt den Pi, das Paket SOFORT in die SSH-Leitung zu drücken
         sys.stdout.flush() 
 
-        # Kurze Pause für stabile FPS und um den SSH-Kanal nicht zu überlasten (ca. 20 FPS)
-        time.sleep(0.05) 
+        # Wir können die FPS jetzt etwas höher ansetzen, da die CPU kaum belastet wird (ca. 25-30 FPS)
+        time.sleep(0.03) 
 
 except KeyboardInterrupt:
     pass
